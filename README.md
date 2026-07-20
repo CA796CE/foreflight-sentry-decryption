@@ -55,25 +55,50 @@ channel. Recognized apps are embedded as JSON templates:
 {"App":"Flite Deck Pro","GDL90":{"port":4000}}
 ```
 
-The handshake JSON also carries an **`"auth"`** field. Working hypothesis: the
-device sends **encrypted** GDL90 when an authenticated **ForeFlight** client is
-connected, and emits **standard, unencrypted ("public") GDL90** otherwise — the
-presence of **Flite Deck Pro** (a non-ForeFlight EFB) as a recognized app is the
-tell. `publicGDL90` appears to be a **device-global** mode (single flag, not
-per-connection), which raises an open question (below).
-
 **If we can drive the device into `publicGDL90 = true`, the encryption problem
 disappears entirely — no key needed.** This is the preferred path.
 
-### Open questions being reversed
-- Exactly what handshake / `auth` value flips `publicGDL90` to true?
-- Is `publicGDL90` global? **If ForeFlight connects first (private), then a
-  second client handshakes as a "public" app, does the whole device switch to
-  plaintext (affecting ForeFlight too), and does ForeFlight re-assert private in
-  a loop?** (Determines whether a field-usable third-party setup is stable.)
-- `publicGDL90` is also used as a **config key** in the firmware's `Get = %s /
-  Set = %s` key-value system — is it settable directly (console / websocket /
-  HTTP), independent of the app handshake? (It is **not** exposed in `/settings`.)
+### What the firmware reverse-engineering shows (v1.0.17, classic ESP32 / Xtensa)
+
+Disassembled with `xtensa-esp32-elf-objdump`; addresses below are from the
+plaintext OTA image.
+
+- **The app handshake does *not* pick the encryption mode.** The handler at
+  `0x400e121c` does an exact `memcmp` of the incoming websocket JSON against the
+  two templates (ForeFlight = 42 bytes, Flite Deck Pro = 46 bytes) and **both
+  recognized apps branch to the *same* code** (`0x400e1255`). So identifying as
+  Flite Deck Pro does **not** flip anything — it just validates "known app."
+- **`publicGDL90` is a persistent `FLASH_PARAMETERS` config key**, set through a
+  string-keyed config dispatch (sequential key compares at `0x400e5100+`). Its
+  siblings in that table are `wifi`, `ahrs`, `Power`, `coAlarmLevel`, `tests`,
+  `operationalChannel` — **the same top-level keys returned by
+  `GET /settings/?action=get`.** So the same JSON config handler almost
+  certainly accepts `publicGDL90`, even though `?action=get` doesn't report it
+  (hidden/undocumented key).
+- **Setter (`0x400e5145`–`0x400e516e`):** on key match it parses the value,
+  **stores one byte to the global at DRAM `0x3ffb6c5c`**, and logs
+  `Setting publicGDL90 to enable|disable`. It's a **single device-global byte**,
+  and being a FLASH parameter it is expected to **persist across reboot**.
+
+### Answers to the key questions
+
+- **How to flip it:** most likely `POST /settings/?action=set` with body
+  `{"publicGDL90":"enable"}` (or `true`/`1`) — the same endpoint/handler used for
+  the other flash parameters. (Serial console is the other setter, but the USB-C
+  port is charge-only, so that needs case entry.) **Not yet tested — this is a
+  write, and testing has been kept non-destructive so far.**
+- **ForeFlight first, then a "public" set:** because `publicGDL90` is a single
+  global (not per-connection) and the connection handshake never writes it,
+  setting it to `enable` switches the **whole device** to standard unencrypted
+  GDL90 for **all** clients — ForeFlight included (it reads standard GDL90
+  natively). Statically, nothing in the connect path re-asserts private, and the
+  value persists in flash, so it should **stick**. The one unknown is whether the
+  ForeFlight *app* proactively issues its own config-set to force
+  `publicGDL90=disable` on connect — observable by capturing the websocket
+  traffic when ForeFlight attaches.
+
+> Caveat: RE was done on v1.0.17; the deployed device runs v1.0.32. The mechanism
+> is expected to hold but exact key/paths should be reconfirmed.
 
 ## Device / firmware facts
 
