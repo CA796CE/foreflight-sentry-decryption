@@ -10,9 +10,17 @@ understand that scheme and find a legitimate way to get usable data out —
 ideally by flipping the device's own **`publicGDL90`** (unencrypted) mode rather
 than by breaking any cryptography.
 
-> Status: research / reverse-engineering in progress. Nothing here breaks
-> encryption; the most promising result is a **plaintext ("public") GDL90 mode
-> that already exists in the firmware.**
+> Status: **SOLVED (no decryption needed).** The device has a built-in
+> `publicGDL90` mode; setting it makes the Sentry emit standard, CRC-valid,
+> plaintext GDL90 that any EFB can read. Confirmed live on firmware 1.0.32 and
+> fully reversible — see [`publicgdl90-test.md`](publicgdl90-test.md).
+>
+> ```bash
+> # unlock (standard plaintext GDL90 on UDP :4000):
+> curl -X POST -H 'Content-Type: application/json' \
+>      -d '{"publicGDL90":true}' 'http://192.168.4.1/settings/?action=set'
+> # revert to ForeFlight-encrypted:  -d '{"publicGDL90":false}'
+> ```
 
 ## The problem, precisely
 
