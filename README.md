@@ -177,6 +177,25 @@ brute-forceable, and that still requires reversing the derivation.
 - **uAvionix Sentry is ForeFlight-only** (background):
   <https://support.uavionix.com/hc/en-us/articles/48078883059859-ForeFlight-Sentry-FAQs>
 
+## Links to explore
+
+Reference implementations for *producing* / consuming standard GDL90 — useful
+now that the Sentry can emit plaintext, both for validating our decode and for
+building a transcoder or a Stratux-style replacement feed.
+
+- **Stratux `gen_gdl90.go`** — the canonical open-source GDL90 encoder
+  (heartbeat, ownship, traffic, AHRS, ForeFlight ID message, CRC + byte
+  stuffing):
+  <https://github.com/cyoung/stratux/blob/master/main/gen_gdl90.go>
+  — and the whole repo: <https://github.com/cyoung/stratux>
+- **VirusPilot's Stratux notes (gist)** — practical config / integration:
+  <https://gist.github.com/VirusPilot/8a7f3b28287f0c4dacb64fd9c2e25ccd>
+- **`stratux-pi4`** — VirusPilot's Pi 4 build of Stratux:
+  <https://github.com/VirusPilot/stratux-pi4>
+- **ForeFlight Connect / GDL90 extended spec** — the vendor-side contract
+  (ForeFlight ID `0x65`, AHRS sub-message, discovery behavior):
+  <https://www.foreflight.com/connect/spec/>
+
 ## Legal / ethical note
 
 This is interoperability research on a device we own, to use our own hardware
