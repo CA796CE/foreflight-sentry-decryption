@@ -1,4 +1,4 @@
-# Firmware crypto path — key hunt (in progress)
+# Firmware crypto path — key hunt (SOLVED)
 
 RE of the plaintext OTA image (`Sentry_V1.0.17.bin`, classic ESP32 / Xtensa LX6)
 using an ELF rebuilt from the segments + radare2. Goal: extract the AES key that
@@ -38,7 +38,8 @@ KEY = bytes.fromhex('a6b1c01f2200566268937c708a06ddcf')
 def decrypt_0x26(content):           # content = destuffed, CRC-stripped, starts 26 00
     nblk = (len(content) - 2) // 16  # last ~18B is a plaintext trailer, not encrypted
     pt = AES.new(KEY, AES.MODE_ECB).decrypt(content[2:2+16*nblk])
-    return pt                        # uAvionix message(s): 0x28/0x27/0x25/... 
+    return pt                        # uAvionix message(s): 0x28/0x27/0x25/...
+```
 
 ## (original static-RE notes below — superseded by the brute-force result)
 
