@@ -111,8 +111,8 @@ false `0x21` hits — tightened to the exact `21 ff ff ff 8D…` signature.
 | 41 | 5 | — | `0x28` (subtype 06) ✔ |
 
 **Ground truth (public-mode toggle, `pubcheck.py`):** flipping `publicGDL90=true`
-for 15 s decoded **285 `0x21` DF17 frames, 8 distinct ICAOs** (`XXXXXX XXXXXX
-XXXXXX XXXXXX XXXXXX XXXXXX XXXXXX XXXXXX`), then reverted cleanly. In public
+for 15 s decoded **285 `0x21` DF17 frames, 8 distinct US ICAOs** (redacted —
+observed live traffic), then reverted cleanly. In public
 mode there is **no `0x26` at all**. So the secure `len=20` class (~16.7/s) is the
 same traffic that public mode emits as `0x21` (~19/s).
 
@@ -158,6 +158,35 @@ Both static attacks ran and came back **negative** (`keyhunt.py`,
    entropy test — the crib test does not depend on entropy, and still finds
    nothing.)
 
+4. **Transmitted during a ForeFlight session — NO** (`pcap_keyhunt.py`). Slid a
+   16-byte key window over every byte of three captured FF↔Sentry sessions
+   (incl. a real-device bidirectional MITM capture) and tested each vs the
+   traffic. No hit. The `:63093` announce carries only `App`/`GDL90.port`/
+   `Version`/`DeviceName` (no key); HTTP is the plain `?action=get`/`settings`/
+   `data` reads with no auth, no websocket, no token, no binary body; and there
+   are zero long hex/base64 blobs anywhere. **ForeFlight is not handed the key
+   over the wire — it's baked into the app** (a static licensed key, like the
+   ownship key). (Caveat: a rare first-ever-pairing exchange isn't in these
+   captures; a fresh monitor-mode capture of a first pairing would fully close
+   it, but a normal connect shows no key channel.)
+5. **Serial-derived — NO**, tested hard (`serial_keyhunt.py`,
+   `serial_kdf_bruteforce.py`). (a) 1,496 direct candidates from both serials /
+   MAC / SSID via hash/BCD/int/HMAC/XOR and many salts. (b) The embedded-device
+   KDF `K = AES_ECB(K_master).encrypt(serial)` brute-forced over **all 946k
+   firmware windows** as `K_master` × 6 serial forms. Both floor at ~random
+   entropy with no crib hits. Not a simple serial derivation, and not
+   `AES(any-firmware-master, serial)`.
+
+6. **Ownship key with an IV / stream mode — NO** (cryptanalysis, no new key).
+   Tested whether traffic is the *ownship* key in a non-ECB mode (e.g. serial as
+   IV): decrypting all `len=20` blocks with the ownship key gives **per-byte
+   entropy ~7.3 at every position** (max for the sample) and **`D_i⊕D_j` pure
+   random** — a fixed IV cancels in pairwise XOR, so any shared plaintext
+   structure would show, and none does. Raw **`ct_i⊕ct_j` is also random**, ruling
+   out a fixed-keystream stream cipher (CTR/OFB). Only exact 16-byte block repeats
+   survive → **plain ECB with an independent key**, not the ownship key under any
+   IV/mode.
+
 **Note on static decompilation:** reading the key straight out of decompiled code
 is not available — Ghidra's Xtensa decompiler `halt_baddata`s on exactly the
 crypto/key-setup functions (see `firmware-crypto-notes.md`), which is why even the
@@ -173,24 +202,94 @@ deployed 1.0.32 image** (not in the 1.0.17 dump we have — the ownship key was
 version-stable but the traffic key need not be), **(b) a non-obvious KDF / a
 secret not in our identifier set**, or **(c) computed at runtime only**.
 
+### Strategic conclusion (2026-07-22): the traffic key POST-DATES 1.0.17
+The ownship key *is* in 1.0.17 (stable to 1.0.32); the traffic key is *not*
+(exhaustively). So traffic encryption / its key was **added after 1.0.17** — no
+older image (0.2.39, 1.0.17) can contain it. And **1.0.32 is not publicly
+available**: dimme.net (the only known mirror) hosts only `Sentry_V0.2.39.bin`
+and `Sentry_V1.0.17.bin`; 1.0.3x ships OTA-only via ForeFlight. So the "just get
+the newer firmware" path requires a **physical flash dump** of the device or
+**capturing a future OTA** (when it updates to 1.0.33+) — not a download.
+
+The serial *is* read in firmware (status-JSON builder `0x400f1429`+, config area
+`0x400e1091`) and the device reads its **base MAC from eFuse BLK0** (likely the
+per-device secret), with a byte-XOR primitive at `0x400f16f0` — but the AES
+`setkey` path (`FUN_4012426c` + wrappers) does not decompile (Xtensa gap), so the
+serial/MAC→key link cannot be traced statically.
+
 ### Viable remaining paths (need more than we currently have)
-1. **Obtain the 1.0.32 firmware and re-run `keyhunt.py`.** Cheapest if it's a
-   version-specific constant. Getting it is the hard part: the device exposes no
-   flash-read over HTTP (`/espUpdate` only *writes*); options are sniffing a real
-   OTA to the device, an online 1.0.32 dump, or a flash read over UART/JTAG
-   (case entry; USB-C is charge-only).
+1. **Obtain the 1.0.32 firmware and re-run `keyhunt.py`.** Now known NOT to be
+   downloadable (see above). Requires a flash read over UART/JTAG (case entry;
+   USB-C is charge-only) or sniffing a real OTA push. Cheapest *if* the key is a
+   version constant, but needs physical access.
 2. **RAM dump — definitive.** The key sits in the mbedtls AES context in RAM
    regardless of how it's derived. Via `/coredump` (needs inducing a panic; the
    endpoint is currently empty) or JTAG/UART (secure-boot/flash-encryption are
    OFF, so unobstructed once the case is open). Same fallback noted for the
    ownship key in `firmware-crypto-notes.md`.
-3. **Frida on ForeFlight (iOS).** Dumps the runtime key *and* the decrypted
-   traffic format; needs a jailbroken/instrumentable device.
+3. **The ForeFlight app (iOS) — most promising, two sub-paths.** The app
+   *provably* holds the traffic key: it decrypts `0x26` traffic and does not
+   receive the key over the wire (path 4 above). So the key is in the app binary
+   or derivable by app code. Getting the *decrypted* app binary needs a
+   jailbroken iPad/iPhone (App Store IPAs are FairPlay-encrypted) or a decrypted
+   IPA; from there:
+
+   - **3a. Static — brute-force the app binary (easiest if the key is a
+     constant).** Decrypt the FF Mach-O (`frida-ios-dump`), then run the *same*
+     `keyhunt.py` window-slide over the binary's bytes against `secure_hunt.hex`
+     `len=20` traffic. **Locator shortcut:** the app also contains the *ownship*
+     key `a6b1c01f2200566268937c708a06ddcf` — grep the binary for those 16 bytes
+     to find the crypto/key region; the traffic key is very likely a sibling
+     constant nearby (or the derivation code is right there).
+   - **3b. Dynamic — Frida hook (works even if the key is derived at runtime).**
+     Run `frida-server` on the jailbroken device, attach to ForeFlight, and hook
+     the AES key entry point:
+     - CommonCrypto: hook `CCCrypt` (key=arg3, keyLen=arg4) and
+       `CCCryptorCreate`/`CCCryptorCreateWithMode` — log the 16-byte key whenever
+       `alg==kCCAlgorithmAES(0)` and `keyLen==16`.
+     - If FF bundles its own crypto: hook `mbedtls_aes_setkey_enc/_dec`
+       (key=arg1) or `CryptoKit`/BoringSSL AES entry points (enumerate the FF
+       module's exports/symbols to find them).
+     - **Disambiguate the traffic key** from ownship/TLS keys by dumping the
+       cipher *input* (`CCCrypt` dataIn) and matching it to a captured
+       `secure_hunt.hex` `len=20` ciphertext block — the call whose input matches
+       carries the traffic key. Bonus: the same hook reveals the decrypted
+       traffic *format* (the plaintext), which we also don't yet know.
+
+   Skeleton Frida script for 3b:
+   ```js
+   const CCCrypt = Module.findExportByName(null, 'CCCrypt');
+   Interceptor.attach(CCCrypt, {
+     onEnter(a) {
+       const alg = a[1].toInt32(), keyLen = a[4].toInt32();
+       if (alg === 0 && keyLen === 16) {          // AES-128
+         console.log('key   ' + a[3].readByteArray(16));
+         console.log('input ' + a[6].readByteArray(Math.min(32, a[7].toInt32())));
+       }
+     }
+   });
+   ```
+   (Also attach `CCCryptorUpdate` if FF uses the streaming `CCCryptorCreate` API,
+   since there the key is captured at *create* time, not per-block.)
 
 Until one of those lands, **traffic on an unmodified (secure) Sentry is not
 recoverable** — use `publicGDL90` mode for traffic (`0x21` → `transcoder/`).
 
-Scripts: `~/tmp/sentry/keyhunt.py` (static), `derived_keyhunt.py` (derived).
+### Summary of possibilities for where the traffic key lives
+- **(P1) Constant new in 1.0.32 firmware** — not downloadable; needs a device
+  flash dump or a captured OTA. (Not in 1.0.17.)
+- **(P2) Per-device derived on-device** from a secret we can't see (eFuse
+  MAC/BLK0, an NVS blob) via an algorithm in the firmware/app — not guessable;
+  needs the derivation code (1.0.32 / app) or the runtime key (RAM dump).
+- **(P3) Static constant baked into the ForeFlight app** — recoverable by
+  brute-forcing the decrypted app binary (path 3a). Most tractable if you have a
+  jailbroken device.
+- **(P4) Assembled only at runtime** — regardless of P1–P3, a device RAM dump
+  (path 2) or a Frida hook (path 3b) yields it directly.
+
+Scripts (all reusable against a firmware/app binary or a new capture):
+`~/tmp/sentry/keyhunt.py`, `derived_keyhunt.py`, `crib_keyhunt.py`,
+`pcap_keyhunt.py`, `serial_keyhunt.py`, `serial_kdf_bruteforce.py`.
 
 ## Open items
 - Recover the **traffic key** (above) — the real remaining blocker for passive

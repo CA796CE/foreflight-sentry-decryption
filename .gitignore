@@ -1,0 +1,15 @@
+# Never commit captures — they contain live ADS-B ICAOs/positions (leak
+# location + time) and real ForeFlight device names. Keep them local only.
+*.hex
+*.pcap
+*.pcapng
+
+# Local, git-ignored config holding this device's real identifiers
+# (serials, MAC/BSSID, SSID suffix, observed ICAOs/callsigns). Scripts read
+# from here so the committed code stays anonymous.
+local_targets.py
+local_targets.json
+.env
+
+__pycache__/
+*.pyc
