@@ -287,9 +287,11 @@ recoverable** — use `publicGDL90` mode for traffic (`0x21` → `transcoder/`).
 - **(P4) Assembled only at runtime** — regardless of P1–P3, a device RAM dump
   (path 2) or a Frida hook (path 3b) yields it directly.
 
-Scripts (all reusable against a firmware/app binary or a new capture):
-`~/tmp/sentry/keyhunt.py`, `derived_keyhunt.py`, `crib_keyhunt.py`,
-`pcap_keyhunt.py`, `serial_keyhunt.py`, `serial_kdf_bruteforce.py`.
+Scripts (parameterized, reusable against a firmware/app binary or a new capture):
+[`keyhunt/`](keyhunt/) — `keyhunt.py`, `crib_keyhunt.py`, `pcap_keyhunt.py`,
+`derived_keyhunt.py`, `serial_keyhunt.py`, `serial_kdf_bruteforce.py`,
+`mode_test.py`. Device identifiers come from a git-ignored `local_targets.py`;
+the ICAO/callsign oracle is decoded from a `--public` capture.
 
 ## Open items
 - Recover the **traffic key** (above) — the real remaining blocker for passive
