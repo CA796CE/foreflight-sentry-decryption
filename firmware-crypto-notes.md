@@ -13,6 +13,13 @@ encrypts the `0x26` GDL90 payload.
 > is stable across firmware versions and matches cbpowell's report (16-byte
 > hardcoded, AES-128-ECB, null IV). This enables **passive decryption of an
 > unmodified Sentry** (no need to flip `publicGDL90`).
+>
+> **CAVEAT (2026-07-22): this key decrypts OWNSHIP only, not TRAFFIC.** A
+> secure+traffic capture showed the traffic class (`0x26` `len=20`, ~16.7/s) is
+> **not** decryptable with this key (entropy stays 7.94; known-overhead ICAOs
+> absent). The Sentry uses a **second, unknown key for traffic**. See
+> `encrypt-mode-traffic.md` → "Findings 2026-07-22" and "Getting the traffic key"
+> (re-run the brute force below against a `len=20` block).
 
 ## How the key was found (brute force, given cbpowell's AES-128-ECB hint)
 The 16-byte key is a hardcoded constant *somewhere* in the plaintext firmware
